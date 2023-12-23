@@ -1,6 +1,6 @@
-[submodule "pymisp/data/misp-objects"]
-	path = pymisp/data/misp-objects
+[submodule "pymisp-async/data/misp-objects"]
+	path = pymisp-async/data/misp-objects
 	url = https://github.com/MISP/misp-objects
-[submodule "pymisp/tools/pdf_fonts"]
-	path = pymisp/tools/pdf_fonts
+[submodule "pymisp-async/tools/pdf_fonts"]
+	path = pymisp-async/tools/pdf_fonts
 	url = https://github.com/MISP/pdf_fonts

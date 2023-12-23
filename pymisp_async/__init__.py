@@ -6,7 +6,7 @@ import importlib.metadata
 
 logger = logging.getLogger(__name__)
 
-__version__ = importlib.metadata.version("pymisp")
+__version__ = importlib.metadata.version("pymisp_async")
 
 
 def warning_2024():
@@ -57,6 +57,7 @@ try:
     except NameError:
         # FIXME: The import should not raise an exception if reportlab isn't installed
         pass
-    logger.debug('pymisp loaded properly')
+    logger.debug('pymisp-async loaded properly')
 except ImportError as e:
-    logger.warning('Unable to load pymisp properly: {}'.format(e))
+    logger.warning('Unable to load pymisp-async properly: {}'.format(e))
+    logger.exception(e)

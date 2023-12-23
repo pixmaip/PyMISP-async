@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import csv
-from pymisp import MISPObject
+from pymisp_async import MISPObject
 
 
 class CSVLoader():

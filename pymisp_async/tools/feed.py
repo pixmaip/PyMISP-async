@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
-from pymisp import MISPEvent
+from pymisp_async import MISPEvent
 import json
 from typing import List
 

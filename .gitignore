@@ -13,7 +13,7 @@ examples/feed_generator/settings\.py
 tests/reportlab_testoutputs/*\.pdf
 build/*
 dist/*
-pymisp.egg-info/*
+pymisp-async.egg-info/*
 .coverage
 .idea
 
