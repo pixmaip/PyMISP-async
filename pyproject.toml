@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pymisp-async"
-version = "2.4.182a1"
+version = "2.4.182a2"
 description = "Python async API for MISP."
 authors = ["Raphaël Vinot <raphael.vinot@circl.lu>"]
 license = "BSD-2-Clause"
