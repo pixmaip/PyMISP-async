@@ -9,13 +9,15 @@ import logging
 from urllib.parse import urljoin
 import json
 import aiohttp
+from aiohttp.client_proto import ResponseHandler
+from aiohttp.tracing import Trace
+import socket
 import re
 from uuid import UUID
 import warnings
 import sys
 import copy
 import ssl as ssl_mod
-import urllib3  # type: ignore
 from io import BytesIO, StringIO
 
 from . import __version__, everything_broken
@@ -29,26 +31,6 @@ from .mispevent import MISPEvent, MISPAttribute, MISPSighting, MISPLog, MISPObje
 from .abstract import pymisp_json_default, MISPTag, AbstractMISP, describe_types
 
 
-if sys.platform == 'linux':
-    # Enable TCP keepalive by default on every requests
-    import socket
-    from urllib3.connection import HTTPConnection
-    HTTPConnection.default_socket_options = HTTPConnection.default_socket_options + [  # type: ignore
-        (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),  # enable keepalive
-        (socket.SOL_TCP, socket.TCP_KEEPIDLE, 30),  # Start pinging after 30s of idle time
-        (socket.SOL_TCP, socket.TCP_KEEPINTVL, 10),  # ping every 10s
-        (socket.SOL_TCP, socket.TCP_KEEPCNT, 6)  # kill the connection if 6 ping fail  (60s total)
-    ]
-
-try:
-    # cached_property exists since Python 3.8
-    from functools import cached_property  # type: ignore
-except ImportError:
-    from functools import lru_cache
-
-    def cached_property(func):  # type: ignore
-        return property(lru_cache()(func))
-
 SearchType = TypeVar('SearchType', str, int)
 # str: string to search / list: values to search (OR) / dict: {'OR': [list], 'NOT': [list], 'AND': [list]}
 SearchParameterTypes = TypeVar('SearchParameterTypes', str, List[Union[str, int]], Dict[str, Union[str, int]])
@@ -56,6 +38,24 @@ SearchParameterTypes = TypeVar('SearchParameterTypes', str, List[Union[str, int]
 ToIDSType = TypeVar('ToIDSType', str, int, bool)
 
 logger = logging.getLogger('pymisp')
+
+
+class SocketConfigurableTCPConnector(aiohttp.TCPConnector):
+    def __init__(self, sockopts: List[Tuple[int, int, int]], *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sockopts = sockopts
+
+    async def _create_connection(
+        self, req: aiohttp.ClientRequest, traces: List[Trace], timeout: aiohttp.ClientTimeout
+    ) -> ResponseHandler:
+        proto = await super()._create_connection(req, traces, timeout)
+
+        if sys.platform == 'linux':
+            sock = proto.transport.get_extra_info('socket')
+            if sock is not None:
+                for sockopt in self.sockopts:
+                    sock.setsockopt(*sockopt)
+        return proto
 
 
 def get_uuid_or_id_from_abstract_misp(obj: Union[AbstractMISP, int, str, UUID, dict]) -> Union[str, int]:
@@ -121,25 +121,17 @@ def brotli_supported() -> bool:
     minor: int
     patch: int
 
-    # urllib >= 1.25.1 includes brotli support
-    version_splitted = urllib3.__version__.split('.')  # noqa: F811
+    # aiohttp >= 3.8.1 includes brotli support
+    version_splitted = aiohttp.__version__.split('.')  # noqa: F811
     if len(version_splitted) == 2:
         major, minor = version_splitted  # type: ignore
         patch = 0
     else:
         major, minor, patch = version_splitted  # type: ignore
     major, minor, patch = int(major), int(minor), int(patch)  # type: ignore
-    urllib3_with_brotli = (major == 1 and ((minor == 25 and patch >= 1) or (minor >= 26))) or major >= 2
+    aiohttp_with_brotli = (major >= 3 and minor >=8 and patch >= 1)
 
-    if not urllib3_with_brotli:
-        return False
-
-    # pybrotli is an extra package required by urllib3 for brotli support
-    try:
-        import brotli  # type: ignore # noqa
-        return True
-    except ImportError:
-        return False
+    return aiohttp_with_brotli
 
 
 class PyMISP:
@@ -154,12 +146,14 @@ class PyMISP:
     :param tool: The software using PyMISP (string), used to set a unique user-agent
     :param http_headers: Arbitrary headers to pass to all the requests.
     :param timeout: Timeout, in seconds
+    :param keep_alive: Enable TCP keepalive
     """
 
     def __init__(self, url: str, key: str, ssl: Union[bool, str] = True, debug: bool = False, proxy: Optional[str] = None,
                  cert: Optional[Union[str, Tuple[str, str]]] = None, tool: str = '',
                  timeout: Optional[float] = None,
                  http_headers: Optional[Dict[str, str]] = None,
+                 keep_alive: bool = True
                  ):
 
         if not url:
@@ -187,8 +181,15 @@ class PyMISP:
             else:
                 ssl_context.load_cert_chain(self.cert[0], self.cert[1])
 
+        sockopts = []
+        if keep_alive:
+            sockopts.append((socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1))  # enable keepalive
+            sockopts.append((socket.SOL_TCP, socket.TCP_KEEPIDLE, 30))    # Start pinging after 30s of idle time
+            sockopts.append((socket.SOL_TCP, socket.TCP_KEEPINTVL, 10))   # ping every 10s
+            sockopts.append((socket.SOL_TCP, socket.TCP_KEEPCNT, 6))      # kill the connection if 6 ping fail  (60s total)
+
         self.__timeout = aiohttp.ClientTimeout(total=self.timeout)
-        self.__tcpconnector = aiohttp.TCPConnector(verify_ssl=verify_ssl, ssl_context=ssl_context)
+        self.__tcpconnector = SocketConfigurableTCPConnector(sockopts=sockopts, verify_ssl=verify_ssl, ssl_context=ssl_context, force_close=not keep_alive)
         self.__session = aiohttp.ClientSession(timeout=self.__timeout, connector=self.__tcpconnector)  # use one session to keep connection between requests
 
         if brotli_supported():
